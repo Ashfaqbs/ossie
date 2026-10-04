@@ -340,7 +340,8 @@ class OssieToSalesforceConverterTest {
                         + "  - vendor_name: SALESFORCE\n"
                         + "    data: |-\n"
                         + "      {\n"
-                        + "        \"label\": \"Total Revenue (Custom Label)\"\n"
+                        + "        \"label\": \"Total Revenue (Custom Label)\",\n"
+                        + "        \"dataType\": \"Currency\"\n"
                         + "      }\n");
         assertTrue(yamlWithMetricExtension.contains("Total Revenue (Custom Label)"),
                 "fixture text substitution did not match");
@@ -356,6 +357,8 @@ class OssieToSalesforceConverterTest {
         assertNotNull(totalRevenue);
         assertEquals("Total Revenue (Custom Label)", totalRevenue.get("label"),
                 "custom_extensions on a metric should be restored onto its exported semanticCalculatedMeasurement");
+        assertEquals("Currency", totalRevenue.get("dataType"),
+                "exact Salesforce dataType restored from custom_extensions should win over the Tua compiler's derived type");
         // The compiled Tua expression is still produced normally; restoring custom_extensions
         // must not interfere with fields the expression compiler itself computes.
         assertEquals("SUM([Orders].[amount])", totalRevenue.get("expression"));
@@ -366,8 +369,10 @@ class OssieToSalesforceConverterTest {
                 .findFirst()
                 .orElse(null);
         assertNotNull(avgOrderValue);
-        assertNull(avgOrderValue.get("label"),
-                "a metric with no custom_extensions should not get a label invented for it");
+        assertEquals("avg_order_value", avgOrderValue.get("label"),
+                "a metric with no custom_extensions label should default its label to apiName");
+        assertEquals("Number", avgOrderValue.get("dataType"),
+                "a metric with no custom_extensions dataType should keep the Tua compiler's derived type");
     }
 
     @Test
