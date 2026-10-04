@@ -392,12 +392,12 @@ semantic_model:
       datatype: Decimal
       expression:
         dialects:
-        - dialect: ANSI_SQL
+        - dialect: TABLEAU
           expression: SUM([Orders].[amount])
     - description: Average amount per order
       name: avg_order_value
       datatype: Decimal
       expression:
         dialects:
-        - dialect: ANSI_SQL
+        - dialect: TABLEAU
           expression: AVG([Orders].[amount])

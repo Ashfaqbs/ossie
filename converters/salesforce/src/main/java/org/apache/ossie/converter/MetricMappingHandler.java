@@ -85,9 +85,27 @@ public class MetricMappingHandler implements PipelineStep {
 
         outputData.putAll(mappedData);
 
+        // Restore before unwrapExpressions(): restore only fills absent keys, so exact
+        // Salesforce values (e.g. dataType Currency) must land before derived ones.
+        customExtensionHandler.restoreCustomExtensionsAtLevel(outputData, sourceData, Level.METRICS);
+
         List<Object> sfMetrics = getList(outputData, SEMANTIC_CALCULATED_MEASUREMENTS);
         if (sfMetrics != null) {
             unwrapExpressions(ossieMetrics, sfMetrics);
+            applyDefaults(sfMetrics);
+        }
+    }
+
+    /**
+     * Applies default values for required Salesforce calculated measurement properties.
+     * Used when converting Ossie → Salesforce.
+     */
+    private void applyDefaults(List<Object> sfMetrics) {
+        for (Object sfMetricObj : sfMetrics) {
+            Map<String, Object> sfMetric = asMap(sfMetricObj);
+            if (!sfMetric.containsKey(LABEL) && sfMetric.containsKey(API_NAME)) {
+                sfMetric.put(LABEL, getString(sfMetric, API_NAME));
+            }
         }
     }
 
@@ -129,12 +147,12 @@ public class MetricMappingHandler implements PipelineStep {
     /**
      * Unwraps expressions for Ossie→SF conversion, mirroring {@link #wrapExpressions}.
      *
-     * <p>Picks an expression out of each Ossie metric's {@code expression.dialects[]} and
-     * flattens it into the Salesforce metric's {@code expression} string. {@code TABLEAU} is
-     * preferred (it is what Salesforce/Tableau CRM itself speaks); a model authored without one
-     * falls back to {@code ANSI_SQL} best-effort, since resolving/rewriting an expression into
-     * TABLEAU syntax is the scope of #222's expression-language work, not this fix. A metric with
-     * neither dialect fails the conversion rather than being silently omitted (#399).
+     * <p>Picks the {@code TABLEAU}-dialect expression out of each Ossie metric's
+     * {@code expression.dialects[]} and flattens it into the Salesforce metric's
+     * {@code expression} string. {@code TABLEAU} is what Salesforce/Tableau CRM itself speaks;
+     * an {@code ANSI_SQL} expression is not translated to Tableau syntax, since that is the scope
+     * of #222's expression-language work, not this fix (see #403). A metric with no TABLEAU
+     * dialect fails the conversion rather than exporting an untranslated expression (#399).
      */
     private void unwrapExpressions(List<Object> ossieMetrics, List<Object> sfMetrics) {
         for (int i = 0; i < ossieMetrics.size() && i < sfMetrics.size(); i++) {
@@ -143,25 +161,18 @@ public class MetricMappingHandler implements PipelineStep {
 
             String expressionValue = extractExpression(ossieMetric, DIALECT_TABLEAU);
             if (expressionValue == null) {
-                expressionValue = extractExpression(ossieMetric, DIALECT_ANSI_SQL);
-                if (expressionValue != null) {
-                    logger.warn(
-                            "Metric '{}' has no TABLEAU-dialect expression; exporting its "
-                                    + "ANSI_SQL expression to Salesforce unresolved/untranslated",
-                            getString(ossieMetric, NAME));
-                }
-            }
-            if (expressionValue == null) {
                 throw new ConversionException(
-                        "Metric '" + getString(ossieMetric, NAME) + "' has neither a TABLEAU nor "
-                                + "an ANSI_SQL expression to export to Salesforce; add one to "
-                                + "expression.dialects[] or remove the metric.");
+                        "Metric '" + getString(ossieMetric, NAME) + "' has no TABLEAU expression "
+                                + "to export to Salesforce; add one to expression.dialects[] or "
+                                + "remove the metric.");
             }
             sfMetric.put(EXPRESSION, expressionValue);
 
             String datatype = SalesforceDataTypeMapper.toSalesforce(getString(ossieMetric, OSSIE_DATATYPE));
             if (datatype != null) {
-                sfMetric.put(DATA_TYPE, datatype);
+                // Exact Salesforce value restored from custom_extensions wins over the
+                // mapped Ossie datatype (e.g. a restored "Currency" over a mapped "Decimal").
+                sfMetric.putIfAbsent(DATA_TYPE, datatype);
             }
         }
     }
