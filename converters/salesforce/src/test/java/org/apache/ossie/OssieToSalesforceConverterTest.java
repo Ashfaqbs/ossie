@@ -316,6 +316,61 @@ class OssieToSalesforceConverterTest {
     }
 
     @Test
+    void testMetricCustomExtensionsRestoredBeforeExpressionCompilation() throws Exception {
+        // Normalize line endings first: the fixture file may check out with CRLF depending on
+        // the platform's autocrlf setting, but the substitution below is written with LF.
+        String yamlWithMetricExtension = ossieYaml.replace("\r\n", "\n").replace(
+                "metrics:\n"
+                        + "- description: Sum of all order amounts\n"
+                        + "  name: total_revenue\n"
+                        + "  datatype: Decimal\n"
+                        + "  expression:\n"
+                        + "    dialects:\n"
+                        + "    - dialect: ANSI_SQL\n"
+                        + "      expression: SUM([Orders].[amount])\n",
+                "metrics:\n"
+                        + "- description: Sum of all order amounts\n"
+                        + "  name: total_revenue\n"
+                        + "  datatype: Decimal\n"
+                        + "  expression:\n"
+                        + "    dialects:\n"
+                        + "    - dialect: ANSI_SQL\n"
+                        + "      expression: SUM([Orders].[amount])\n"
+                        + "  custom_extensions:\n"
+                        + "  - vendor_name: SALESFORCE\n"
+                        + "    data: |-\n"
+                        + "      {\n"
+                        + "        \"label\": \"Total Revenue (Custom Label)\"\n"
+                        + "      }\n");
+        assertTrue(yamlWithMetricExtension.contains("Total Revenue (Custom Label)"),
+                "fixture text substitution did not match");
+
+        List<String> results = converter.convert(yamlWithMetricExtension);
+        Map<String, Object> sfModel = jsonMapper.readValue(results.get(0), new TypeReference<Map<String, Object>>() {});
+        List<Map<String, Object>> calcMeasurements = (List<Map<String, Object>>) sfModel.get("semanticCalculatedMeasurements");
+
+        Map<String, Object> totalRevenue = calcMeasurements.stream()
+                .filter(m -> "total_revenue".equals(m.get("apiName")))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(totalRevenue);
+        assertEquals("Total Revenue (Custom Label)", totalRevenue.get("label"),
+                "custom_extensions on a metric should be restored onto its exported semanticCalculatedMeasurement");
+        // The compiled Tua expression is still produced normally; restoring custom_extensions
+        // must not interfere with fields the expression compiler itself computes.
+        assertEquals("SUM([Orders].[amount])", totalRevenue.get("expression"));
+        assertEquals("Tua", totalRevenue.get("syntax"));
+
+        Map<String, Object> avgOrderValue = calcMeasurements.stream()
+                .filter(m -> "avg_order_value".equals(m.get("apiName")))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(avgOrderValue);
+        assertNull(avgOrderValue.get("label"),
+                "a metric with no custom_extensions should not get a label invented for it");
+    }
+
+    @Test
     void testMetricExpressionPrefersTableauDialectOverAnsiSql() throws Exception {
         // Normalize line endings first: the fixture file may check out with CRLF depending on
         // the platform's autocrlf setting, but the substitution below is written with LF.

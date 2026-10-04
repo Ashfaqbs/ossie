@@ -93,6 +93,8 @@ public class MetricMappingHandler implements PipelineStep {
 
         outputData.putAll(mappedData);
 
+        customExtensionHandler.restoreCustomExtensionsAtLevel(outputData, sourceData, Level.METRICS);
+
         List<Object> sfMetrics = getList(outputData, SEMANTIC_CALCULATED_MEASUREMENTS);
         if (sfMetrics != null) {
             unwrapExpressions(ossieMetrics, sfMetrics, sourceData, outputData);
